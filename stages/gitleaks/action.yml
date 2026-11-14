@@ -1,0 +1,9 @@
+name: 'Loop · secrets in code (Gitleaks)'
+description: Fails if a secret is found anywhere in the git history. Needs actions/checkout with fetch-depth 0.
+inputs:
+  version: { description: Gitleaks version, default: v8.30.1 }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: docker run --rm -v "$PWD:/repo" "ghcr.io/gitleaks/gitleaks:${{ inputs.version }}" git /repo --redact --no-banner --exit-code 1

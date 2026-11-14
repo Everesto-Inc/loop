@@ -1,0 +1,3 @@
+site_name: Loop
+nav: [{ Overview: index.md }]
+plugins: [techdocs-core]

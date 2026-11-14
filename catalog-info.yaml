@@ -1,0 +1,23 @@
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: loop
+  title: Loop
+  description: Shared CI/CD pipeline stages used by every application
+spec:
+  owner: platform-team
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: loop-stages
+  title: Loop stages
+  description: Reusable GitHub Actions stages (guard, install, semgrep, sonarqube, build-image, push-image, deploy-argocd)
+  annotations:
+    github.com/project-slug: Everesto-Inc/loop
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: library
+  lifecycle: production
+  owner: platform-team
+  system: loop

@@ -1,0 +1,26 @@
+name: 'Loop · install + tests'
+description: Set up the language, install dependencies, run tests with coverage (coverage report is used by SonarQube).
+inputs:
+  stack: { description: 'python | java', required: true }
+  python-version: { description: Python version, default: '3.12' }
+  java-version: { description: Java version, default: '21' }
+  test-command: { description: 'Override the test command (empty = stack default)', default: '' }
+runs:
+  using: composite
+  steps:
+    - if: inputs.stack == 'python'
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with: { python-version: '${{ inputs.python-version }}', cache: pip }
+    - if: inputs.stack == 'python'
+      shell: bash
+      run: pip install -r requirements.txt $( [ -f requirements-dev.txt ] && echo -r requirements-dev.txt )
+    - if: inputs.stack == 'java'
+      uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+      with: { distribution: temurin, java-version: '${{ inputs.java-version }}', cache: maven }
+    - shell: bash
+      env: { STACK: '${{ inputs.stack }}', CMD: '${{ inputs.test-command }}' }
+      run: |
+        if [ -n "$CMD" ]; then eval "$CMD"
+        elif [ "$STACK" = python ]; then pytest --cov=app --cov-report=xml
+        elif [ "$STACK" = java ]; then mvn -B -ntp verify
+        else echo "::error::unknown stack $STACK"; exit 1; fi

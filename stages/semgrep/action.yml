@@ -1,0 +1,10 @@
+name: 'Loop · code security (Semgrep)'
+description: Static analysis with the Semgrep community rules. Fails on findings.
+inputs:
+  config: { description: Rule set(s), default: p/default }
+  extra-args: { description: Extra semgrep arguments (e.g. --exclude tests), default: '' }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: pipx run semgrep scan --config "${{ inputs.config }}" --error --metrics=off ${{ inputs.extra-args }}

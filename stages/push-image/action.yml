@@ -1,0 +1,21 @@
+name: 'Loop · push image'
+description: Pushes the built image to ghcr.io and keeps only the last N versions.
+inputs:
+  image: { description: Image without tag, required: true }
+  tag: { description: Tag from build-image, required: true }
+  token: { description: 'GITHUB_TOKEN (needs packages: write)', required: true }
+  keep: { description: Versions to keep, default: '5' }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env: { TOKEN: '${{ inputs.token }}', REF: '${{ inputs.image }}:${{ inputs.tag }}' }
+      run: |
+        echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        docker push "$REF"
+    - id: pkg
+      shell: bash
+      run: echo "name=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+    - continue-on-error: true
+      uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+      with: { package-name: '${{ steps.pkg.outputs.name }}', package-type: container, min-versions-to-keep: '${{ inputs.keep }}', token: '${{ inputs.token }}' }

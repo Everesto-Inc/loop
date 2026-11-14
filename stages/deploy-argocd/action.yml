@@ -1,0 +1,23 @@
+name: 'Loop · deploy (ArgoCD)'
+description: Writes the new image tag into the project's gitops repo (kustomize newTag). ArgoCD syncs it.
+inputs:
+  deploy-key: { description: GITOPS_DEPLOY_KEY secret (write deploy key of the gitops repo), required: true }
+  gitops-repo: { description: 'e.g. Everesto-Inc/seine-gitops-cd', required: true }
+  path: { description: App folder in the gitops repo, required: true }
+  tag: { description: Image tag, required: true }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env: { DEPLOY_KEY: '${{ inputs.deploy-key }}', GITOPS_REPO: '${{ inputs.gitops-repo }}', GITOPS_PATH: '${{ inputs.path }}', TAG: '${{ inputs.tag }}' }
+      run: |
+        mkdir -p ~/.ssh && printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/gitops && chmod 600 ~/.ssh/gitops
+        ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+        export GIT_SSH_COMMAND="ssh -i ~/.ssh/gitops -o IdentitiesOnly=yes"
+        rm -rf "$RUNNER_TEMP/gitops" && git clone --depth 1 "git@github.com:${GITOPS_REPO}.git" "$RUNNER_TEMP/gitops"
+        cd "$RUNNER_TEMP/gitops"
+        sed -i -E "s|(newTag: )[^ ]+|\1${TAG}|" "$GITOPS_PATH/kustomization.yaml"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add "$GITOPS_PATH" && (git diff --cached --quiet || git commit -m "${GITOPS_PATH}: image → ${TAG}")
+        git push

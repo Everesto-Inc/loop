@@ -1,0 +1,16 @@
+name: 'Loop · quality gate (SonarQube)'
+description: SonarQube analysis, waits for the quality gate. Skipped (with a notice) when no token is given, e.g. on Dependabot PRs.
+inputs:
+  token: { description: SONAR_TOKEN secret, default: '' }
+  host-url: { description: SonarQube URL, default: 'https://sonar.everesto.live' }
+  extra-args: { description: 'Extra scanner args, e.g. -Dsonar.exclusions=migrations/**', default: '' }
+runs:
+  using: composite
+  steps:
+    - if: inputs.token == ''
+      shell: bash
+      run: echo "::notice::SonarQube skipped — no SONAR_TOKEN (Dependabot PRs get no secrets)"
+    - if: inputs.token != ''
+      uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
+      env: { SONAR_TOKEN: '${{ inputs.token }}', SONAR_HOST_URL: '${{ inputs.host-url }}' }
+      with: { args: '-Dsonar.qualitygate.wait=true ${{ inputs.extra-args }}' }
