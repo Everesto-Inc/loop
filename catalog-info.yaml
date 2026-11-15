@@ -12,10 +12,12 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   name: loop-stages
+  tags: [platform, protected]
   title: Loop stages
   description: Reusable GitHub Actions stages (guard, install, semgrep, sonarqube, build-image, push-image, deploy-argocd)
   annotations:
     github.com/project-slug: Everesto-Inc/loop
+    everesto.live/protected: "true"   # platform root: never deletable from Backstage
     backstage.io/techdocs-ref: dir:.
 spec:
   type: library
