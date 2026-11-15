@@ -6,6 +6,7 @@ metadata:
   description: Shared CI/CD pipeline stages used by every application
 spec:
   owner: platform-team
+  domain: platform        # platform service, shared by every space — not inside a tenant
 ---
 apiVersion: backstage.io/v1alpha1
 kind: Component
