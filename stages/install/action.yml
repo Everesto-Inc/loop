@@ -20,7 +20,16 @@ runs:
     - shell: bash
       env: { STACK: '${{ inputs.stack }}', CMD: '${{ inputs.test-command }}' }
       run: |
-        if [ -n "$CMD" ]; then eval "$CMD"
-        elif [ "$STACK" = python ]; then pytest --cov=app --cov-report=xml
-        elif [ "$STACK" = java ]; then mvn -B -ntp verify
-        else echo "::error::unknown stack $STACK"; exit 1; fi
+        if [ -n "$CMD" ]; then eval "$CMD"; exit $?; fi
+        case "$STACK" in
+          python)
+            if ! python -c 'import pytest, pytest_cov' 2>/dev/null; then
+              echo "::notice::pytest / pytest-cov not in the requirements — installing them for this run (add them to requirements-dev.txt)"
+              pip install --quiet pytest pytest-cov
+            fi
+            set +e; pytest --cov=app --cov-report=xml; rc=$?; set -e
+            if [ "$rc" -eq 5 ]; then echo "::notice::No tests found — tests skipped"; exit 0; fi
+            exit "$rc" ;;
+          java) mvn -B -ntp verify ;;
+          *) echo "::error::unknown stack $STACK"; exit 1 ;;
+        esac

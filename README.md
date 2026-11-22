@@ -28,7 +28,7 @@ jobs:
 
 | Switch | Values | Off means |
 |---|---|---|
-| `tests` | true / false | no install + tests + coverage |
+| `tests` | true / false | no install + tests + coverage. When on: **no tests written → skipped** (notice), **a failing test stops the pipeline**, pytest / pytest-cov installed if the repo doesn't list them |
 | `semgrep` | true / false | no code-security scan |
 | `sonarqube` | true / false | no quality gate (also skipped, with a notice, when there is no `SONAR_TOKEN`) |
 | `trivy` | **enforce** / report | report = dependency + image scans still run and show findings, but never fail. Backstage flags it. |
