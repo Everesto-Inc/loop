@@ -5,7 +5,7 @@
 #     loop:
 #       uses: Everesto-Inc/loop/.github/workflows/pipeline.yml@<sha> # v1.1.0
 #       with: { stack: python, sonarqube: true, semgrep: false, trivy: enforce }
-#       secrets: inherit                       # SONAR_TOKEN (set by Backstage when SonarQube is on)
+#       secrets: { SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}' }   # only what Loop needs — never `inherit` (least privilege)
 #       permissions: { contents: read, packages: write }
 #
 # Switches (Backstage → Edit pipeline flips them):
@@ -105,7 +105,7 @@ jobs:
         with: { args: '-Dsonar.qualitygate.wait=true ${{ inputs.sonar-args }}' }
 
   build:
-    name: Build + scan image${{ github.event_name == 'push' && ' + push' || '' }}
+    name: Build + scan image (push on main)
     needs: [guard, quality]
     # quality may be skipped (all switches off) — build anyway, but never after a failure
     if: always() && needs.guard.result == 'success' && (needs.quality.result == 'success' || needs.quality.result == 'skipped')

@@ -9,7 +9,7 @@ jobs:
   loop:
     uses: Everesto-Inc/loop/.github/workflows/pipeline.yml@<sha> # v1.1.0
     with: { stack: python, tests: true, semgrep: false, sonarqube: true, trivy: enforce }
-    secrets: inherit
+    secrets: { SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}' }   # only what Loop needs — never `inherit` (least privilege)
     permissions: { contents: read, packages: write }
 ```
 
