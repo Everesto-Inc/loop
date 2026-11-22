@@ -1,0 +1,157 @@
+# Loop pipeline (v1.1) — the whole CI of an application as ONE reusable workflow with switches.
+# Every run ends the same way: a scanned linux/arm64 image in ghcr.io (pushed on the default branch only).
+#
+#   jobs:
+#     loop:
+#       uses: Everesto-Inc/loop/.github/workflows/pipeline.yml@<sha> # v1.1.0
+#       with: { stack: python, sonarqube: true, semgrep: false, trivy: enforce }
+#       secrets: inherit                       # SONAR_TOKEN (set by Backstage when SonarQube is on)
+#       permissions: { contents: read, packages: write }
+#
+# Switches (Backstage → Edit pipeline flips them):
+#   tests      true  | false     install + tests + coverage
+#   semgrep    true  | false     code security
+#   sonarqube  true  | false     quality gate (skipped with a notice when no SONAR_TOKEN, e.g. Dependabot PRs)
+#   trivy      enforce | report  dependency + image scans ALWAYS run; report = findings never fail (Backstage flags it)
+# Always on (not switchable): Gitleaks, Trivy scans, image build, push on the default branch.
+# Self-contained on purpose (like guard.yml): no references to other Loop refs, so one pinned SHA = one exact pipeline.
+name: loop-pipeline
+on:
+  workflow_call:
+    inputs:
+      stack: { type: string, required: true, description: 'python | java | docker (docker = no language step)' }
+      tests: { type: boolean, default: true }
+      test-command: { type: string, default: '', description: 'override the stack default test command' }
+      python-version: { type: string, default: '3.12' }
+      java-version: { type: string, default: '21' }
+      semgrep: { type: boolean, default: false }
+      semgrep-args: { type: string, default: '' }
+      sonarqube: { type: boolean, default: false }
+      sonar-args: { type: string, default: '', description: 'e.g. -Dsonar.exclusions=migrations/**' }
+      trivy: { type: string, default: enforce, description: 'enforce | report' }
+      image: { type: string, default: '', description: 'default: ghcr.io/<owner>/<repo> (lowercase)' }
+      context: { type: string, default: . }
+      dockerfile: { type: string, default: Dockerfile }
+      build-args: { type: string, default: '' }
+      keep: { type: string, default: '5', description: 'image versions kept in ghcr.io' }
+      runner: { type: string, default: ubuntu-24.04-arm }
+    secrets:
+      SONAR_TOKEN: { required: false }
+    outputs:
+      image: { description: Image without tag, value: '${{ jobs.build.outputs.image }}' }
+      tag: { description: 'Image tag (sha-<7>)', value: '${{ jobs.build.outputs.tag }}' }
+      pushed: { description: "'true' when the image was pushed", value: '${{ jobs.build.outputs.pushed }}' }
+permissions:
+  contents: read
+env:
+  TRIVY_EXIT: "${{ inputs.trivy == 'report' && '0' || '1' }}"
+
+jobs:
+  guard:
+    name: Guard (Gitleaks + Trivy deps)
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Check inputs
+        env: { STACK: '${{ inputs.stack }}', TRIVY: '${{ inputs.trivy }}' }
+        run: |
+          case "$STACK" in python|java|docker) ;; *) echo "::error::stack must be python, java or docker (got '$STACK')"; exit 1;; esac
+          case "$TRIVY" in enforce|report) ;; *) echo "::error::trivy must be enforce or report (got '$TRIVY')"; exit 1;; esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - name: Secrets in code (Gitleaks)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner --exit-code 1
+      - name: Vulnerable dependencies (Trivy, ${{ inputs.trivy }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: { scan-type: fs, scan-ref: ., severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: '${{ env.TRIVY_EXIT }}' }
+      - if: inputs.trivy == 'report'
+        run: echo "::warning::Trivy is in REPORT mode — vulnerabilities are shown but do not fail the build"
+
+  quality:
+    name: Tests · Semgrep · SonarQube
+    needs: guard
+    if: inputs.tests || inputs.semgrep || inputs.sonarqube
+    runs-on: ${{ inputs.runner }}
+    env:
+      HAS_TOKEN: "${{ secrets.SONAR_TOKEN != '' }}"   # secrets can't be used in `if:` — via env
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }   # SonarQube needs history for new-code detection
+      - if: inputs.tests && inputs.stack == 'python'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: '${{ inputs.python-version }}', cache: pip }
+      - if: inputs.tests && inputs.stack == 'python'
+        run: pip install -r requirements.txt $( [ -f requirements-dev.txt ] && echo -r requirements-dev.txt )
+      - if: inputs.tests && inputs.stack == 'java'
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with: { distribution: temurin, java-version: '${{ inputs.java-version }}', cache: maven }
+      - name: Tests + coverage
+        if: inputs.tests
+        env: { STACK: '${{ inputs.stack }}', CMD: '${{ inputs.test-command }}' }
+        run: |
+          if [ -n "$CMD" ]; then eval "$CMD"
+          elif [ "$STACK" = python ]; then pytest --cov=. --cov-report=xml
+          elif [ "$STACK" = java ]; then mvn -B -ntp verify
+          else echo "::notice::stack docker — no default tests (set test-command to run some)"; fi
+      - name: Code security (Semgrep)
+        if: inputs.semgrep
+        run: pipx run semgrep scan --config p/default --error --metrics=off ${{ inputs.semgrep-args }}
+      - name: SonarQube skipped
+        if: inputs.sonarqube && env.HAS_TOKEN != 'true'
+        run: echo "::notice::SonarQube skipped — no SONAR_TOKEN (Dependabot PRs get no secrets)"
+      - name: Quality gate (SonarQube)
+        if: inputs.sonarqube && env.HAS_TOKEN == 'true'
+        env: { SONAR_TOKEN: '${{ secrets.SONAR_TOKEN }}', SONAR_HOST_URL: 'https://sonar.everesto.live' }
+        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # v8.5.0
+        with: { args: '-Dsonar.qualitygate.wait=true ${{ inputs.sonar-args }}' }
+
+  build:
+    name: Build + scan image${{ github.event_name == 'push' && ' + push' || '' }}
+    needs: [guard, quality]
+    # quality may be skipped (all switches off) — build anyway, but never after a failure
+    if: always() && needs.guard.result == 'success' && (needs.quality.result == 'success' || needs.quality.result == 'skipped')
+    runs-on: ${{ inputs.runner }}
+    permissions: { contents: read, packages: write }
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+      pushed: ${{ steps.push.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: meta
+        env: { IMAGE: '${{ inputs.image }}' }
+        run: |
+          [ -n "$IMAGE" ] || IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - if: runner.arch != 'ARM64'
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build image (linux/arm64)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: linux/arm64
+          build-args: ${{ inputs.build-args }}
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+      - name: Scan image (Trivy, ${{ inputs.trivy }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: { image-ref: '${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}', severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: '${{ env.TRIVY_EXIT }}' }
+      - if: inputs.trivy == 'report'
+        run: echo "::warning::Trivy (image) in REPORT mode — findings do not fail the build"
+      # push only from the default branch — pull requests build + scan, but publish nothing
+      - name: Push to ghcr.io
+        id: push
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env: { TOKEN: '${{ github.token }}', REF: '${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}' }
+        run: |
+          echo "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$REF"
+          echo "### Published \`$REF\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the last ${{ inputs.keep }} versions
+        if: steps.push.outcome == 'success'
+        continue-on-error: true
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with: { package-name: '${{ github.event.repository.name }}', package-type: container, min-versions-to-keep: '${{ inputs.keep }}', token: '${{ github.token }}' }

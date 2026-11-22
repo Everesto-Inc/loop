@@ -5,6 +5,8 @@ on:
   workflow_call:
     inputs:
       runner: { type: string, default: ubuntu-24.04-arm }
+      # enforce = fail on fixable CRITICAL/HIGH (default) · report = show findings in the run summary, never fail
+      trivy: { type: string, default: enforce }
 permissions:
   contents: read
 jobs:
@@ -16,6 +18,12 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Secrets in code (Gitleaks)
         run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner --exit-code 1
-      - name: Vulnerable dependencies (Trivy)
+      - name: Check inputs
+        if: inputs.trivy != 'enforce' && inputs.trivy != 'report'
+        run: echo "::error::trivy must be enforce or report (got '${{ inputs.trivy }}')" && exit 1
+      - name: Vulnerable dependencies (Trivy, ${{ inputs.trivy }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with: { scan-type: fs, scan-ref: ., severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: '1' }
+        with: { scan-type: fs, scan-ref: ., severity: 'CRITICAL,HIGH', ignore-unfixed: true, exit-code: "${{ inputs.trivy == 'report' && '0' || '1' }}" }
+      - name: Trivy in report mode
+        if: inputs.trivy == 'report'
+        run: echo "::warning::Trivy is in REPORT mode — vulnerabilities are shown but do not fail the build. Backstage flags this pipeline." 

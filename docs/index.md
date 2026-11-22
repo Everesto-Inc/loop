@@ -1,6 +1,24 @@
 # Loop
 
-Pipeline stages shared by all Everesto applications. An app's `ci.yml` looks like:
+Pipeline stages shared by all Everesto applications.
+
+## v1.1 (recommended for new apps): one workflow with switches
+
+```yaml
+jobs:
+  loop:
+    uses: Everesto-Inc/loop/.github/workflows/pipeline.yml@<sha> # v1.1.0
+    with: { stack: python, tests: true, semgrep: false, sonarqube: true, trivy: enforce }
+    secrets: inherit
+    permissions: { contents: read, packages: write }
+```
+
+`tests` · `semgrep` · `sonarqube`: true / false · `trivy`: enforce / report (scans always run).
+Always on: Gitleaks, Trivy scans, image build, push from the default branch. See the README for all inputs.
+
+## v1.0: stage by stage
+
+An app's `ci.yml` looks like:
 
 ```yaml
 jobs:

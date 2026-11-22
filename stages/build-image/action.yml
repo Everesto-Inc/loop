@@ -1,5 +1,5 @@
 name: 'Loop · build + scan image (Trivy)'
-description: Builds the image for linux/arm64 (QEMU on x86 runners) and scans it with Trivy. The scan is part of the build — it can't be switched off.
+description: Builds the image for linux/arm64 (QEMU on x86 runners) and scans it with Trivy. The scan always runs — trivy-mode only decides whether findings fail the build.
 inputs:
   image: { description: 'Image without tag, e.g. ghcr.io/everesto-inc/seine-api', required: true }
   context: { description: Build context, default: . }
@@ -7,6 +7,7 @@ inputs:
   platform: { description: Target platform, default: linux/arm64 }
   build-args: { description: Build args (one per line), default: '' }
   severity: { description: Severities that fail the scan, default: 'CRITICAL,HIGH' }
+  trivy-mode: { description: 'enforce (fail on findings) | report (show only, never fail)', default: enforce }
 outputs:
   tag: { description: 'Image tag (sha-<7>)', value: '${{ steps.tag.outputs.tag }}' }
 runs:
@@ -28,4 +29,7 @@ runs:
         push: false
         tags: ${{ inputs.image }}:${{ steps.tag.outputs.tag }}
     - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-      with: { image-ref: '${{ inputs.image }}:${{ steps.tag.outputs.tag }}', severity: '${{ inputs.severity }}', ignore-unfixed: true, exit-code: '1' }
+      with: { image-ref: '${{ inputs.image }}:${{ steps.tag.outputs.tag }}', severity: '${{ inputs.severity }}', ignore-unfixed: true, exit-code: "${{ inputs.trivy-mode == 'report' && '0' || '1' }}" }
+    - if: inputs.trivy-mode == 'report'
+      shell: bash
+      run: echo "::warning::Trivy (image) in REPORT mode — findings do not fail the build" 
